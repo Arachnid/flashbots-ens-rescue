@@ -13,7 +13,7 @@ program
   .option('-f --from <private key>', 'Private key of compromised account to transfer from', undefined)
   .option('-t --to <address>', 'Address to transfer names to', undefined)
   .option('-n --names <names>', 'Comma-separated list of names to transfer', undefined)
-  .option('-f --funder <private key>', 'Private key of account to fund the transactions', undefined)
+  .option('-s --sender <private key>', 'Private key of account to fund the transactions', undefined)
   .option('-g --gasprice <number>', 'Gas price in GWEI to pay for all transactions', '100');
 
 program.parse(process.argv);
@@ -49,10 +49,10 @@ function isRelayResponseError(r: FlashbotsTransactionResponse | SimulationRespon
       options.names = await rl.question('Comma-separated list of names to transfer > ');
   }
 
-  if(!options.funder) {
-      options.funder = await rl.question('Private key of account to fund the transactions > ');
+  if(!options.sender) {
+      options.sender = await rl.question('Private key of account to fund the transactions > ');
   }
-  const funderSigner = ((options.funder as string).includes(' ') ? ethers.Wallet.fromMnemonic(options.funder) : new ethers.Wallet(options.funder)).connect(provider);
+  const senderSigner = ((options.sender as string).includes(' ') ? ethers.Wallet.fromMnemonic(options.sender) : new ethers.Wallet(options.sender)).connect(provider);
 
   const names = options.names.split(',');
   const labelhashes = names.map((name: string) => ethers.utils.id(name.split('.')[0])) as string[];
@@ -60,7 +60,14 @@ function isRelayResponseError(r: FlashbotsTransactionResponse | SimulationRespon
   console.log(`Calculating gas required for ${labelhashes.length + 1} transactions...`);
   const gasLimits = await Promise.all(
     labelhashes.map(
-      (hash: string) => registry.estimateGas.transferFrom(fromSigner.address, options.to, hash, {from: fromSigner.address})
+      async (hash: string, i: number) => {
+        try {
+          return await registry.estimateGas.transferFrom(fromSigner.address, options.to, hash, {from: fromSigner.address})
+        } catch(e) {
+          console.log(`Could not estimate gas for ${names[i]}`);
+          throw e;
+        }
+      }
     )
   );
   const totalGas = gasLimits.reduce((accum, gas) => gas.toNumber() + accum, 0) + 21000;
@@ -83,7 +90,7 @@ function isRelayResponseError(r: FlashbotsTransactionResponse | SimulationRespon
   );
   const bundle = [
     {
-      signer: funderSigner,
+      signer: senderSigner,
       transaction: {
         to: fromSigner.address,
         value: ethRequired,
